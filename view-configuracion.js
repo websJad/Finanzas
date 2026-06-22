@@ -258,7 +258,7 @@ function abrirModalConfigurarPin(esActivacion) {
         const datos = leerForm(e.target, ['pin', 'pinConfirmar']);
         if (!/^\d{4}$/.test(datos.pin)) throw new Error('El PIN debe tener exactamente 4 dígitos.');
         if (datos.pin !== datos.pinConfirmar) throw new Error('Los PIN no coinciden.');
-        STATE.config.pin = datos.pin;
+        STATE.config.pin = String(datos.pin);
         STATE.config.pinHabilitado = true;
         guardarEstado();
         cerrarModal();
@@ -276,31 +276,109 @@ function aplicarTema() {
 /* --------------------------- DATOS DE DEMOSTRACIÓN --------------------------- */
 
 function cargarDatosDemo() {
-  const cuentaEfectivo = STATE.cuentas[0];
-  const cuentaBanco = STATE.cuentas[2] || STATE.cuentas[0];
+  // Función auxiliar para fechas relativas
+  function hace(dias) {
+    var d = new Date(); d.setDate(d.getDate() - dias);
+    return d.toISOString().slice(0, 10);
+  }
 
-  accionAgregarIngreso({ descripcion: 'Sueldo de junio', monto: 3500, categoria: 'general', cuentaId: cuentaBanco.id, estado: 'recibido', fecha: hoyISO().slice(0, 8) + '01' });
-  accionAgregarIngreso({ descripcion: 'Venta de diseño freelance', monto: 450, categoria: 'general', cuentaId: cuentaEfectivo.id, estado: 'pendiente', fecha: hoyISO() });
+  // ── CUENTAS ──
+  accionAgregarCuenta({ nombre: 'Efectivo', tipo: 'efectivo', saldoInicial: 500 });
+  accionAgregarCuenta({ nombre: 'Yape', tipo: 'billetera', saldoInicial: 800 });
+  accionAgregarCuenta({ nombre: 'BCP Ahorros', tipo: 'banco', saldoInicial: 2500 });
+  var ef = STATE.cuentas[STATE.cuentas.length - 3].id;
+  var ya = STATE.cuentas[STATE.cuentas.length - 2].id;
+  var bc = STATE.cuentas[STATE.cuentas.length - 1].id;
 
-  accionAgregarGasto({ descripcion: 'Supermercado Plaza Vea', monto: 280, categoria: 'alimentacion', cuentaId: cuentaBanco.id, fecha: hoyISO() });
-  accionAgregarGasto({ descripcion: 'Uber al trabajo', monto: 45, categoria: 'transporte', cuentaId: cuentaEfectivo.id, fecha: hoyISO() });
-  accionAgregarGasto({ descripcion: 'Cena con amigos', monto: 95, categoria: 'restaurantes', cuentaId: cuentaEfectivo.id, fecha: hoyISO() });
+  // ── TARJETA DE CRÉDITO ──
+  accionAgregarTarjeta({ nombre: 'Visa BCP', limite: 3500, diaCorte: 15, diaPago: 5 });
+  var tid = STATE.tarjetas[STATE.tarjetas.length - 1].id;
 
-  accionAgregarDeuda({ nombre: 'Préstamo personal BBVA', montoOriginal: 4000, cuotas: 12, tasaInteres: 3.2, fechaInicio: hoyISO() });
-  accionAgregarDeuda({ nombre: 'Crédito moto', montoOriginal: 1800, cuotas: 8, tasaInteres: 1.5, fechaInicio: hoyISO() });
+  // ── INGRESOS (últimos 4 meses para que los gráficos tengan historia) ──
+  accionAgregarIngreso({ descripcion: 'Sueldo marzo', monto: 3000, cuentaId: bc, estado: 'recibido', fecha: hace(90) });
+  accionAgregarIngreso({ descripcion: 'Sueldo abril', monto: 3100, cuentaId: bc, estado: 'recibido', fecha: hace(60) });
+  accionAgregarIngreso({ descripcion: 'Freelance abril', monto: 500, cuentaId: ya, estado: 'recibido', fecha: hace(55) });
+  accionAgregarIngreso({ descripcion: 'Sueldo mayo', monto: 3200, cuentaId: bc, estado: 'recibido', fecha: hace(30) });
+  accionAgregarIngreso({ descripcion: 'Freelance diseño logo', monto: 350, cuentaId: ya, estado: 'recibido', fecha: hace(22) });
+  accionAgregarIngreso({ descripcion: 'Sueldo junio', monto: 3200, cuentaId: bc, estado: 'recibido', fecha: hace(5) });
+  accionAgregarIngreso({ descripcion: 'Venta laptop usada', monto: 800, cuentaId: ef, estado: 'recibido', fecha: hace(3) });
+  accionAgregarIngreso({ descripcion: 'Proyecto web cliente', monto: 600, cuentaId: ya, estado: 'pendiente', fecha: hace(1) });
 
-  const venc = new Date();
-  venc.setDate(venc.getDate() + 5);
-  accionAgregarPagoPendiente({ descripcion: 'Alquiler de junio', monto: 900, fechaVencimiento: venc.toISOString().slice(0, 10), categoria: 'vivienda', recurrente: true });
+  // ── GASTOS (variados, últimos 4 meses) ──
+  // Hace 3 meses
+  accionAgregarGasto({ descripcion: 'Supermercado marzo', monto: 310, categoria: 'alimentacion', cuentaId: bc, fecha: hace(88) });
+  accionAgregarGasto({ descripcion: 'Gasolina marzo', monto: 100, categoria: 'transporte', cuentaId: ef, fecha: hace(85) });
+  accionAgregarGasto({ descripcion: 'Recibos marzo', monto: 210, categoria: 'servicios', cuentaId: bc, fecha: hace(82) });
+  accionAgregarGasto({ descripcion: 'Restaurante marzo', monto: 75, categoria: 'restaurantes', cuentaId: ya, fecha: hace(80) });
+  // Hace 2 meses
+  accionAgregarGasto({ descripcion: 'Supermercado abril', monto: 340, categoria: 'alimentacion', cuentaId: bc, fecha: hace(58) });
+  accionAgregarGasto({ descripcion: 'Gasolina abril', monto: 130, categoria: 'transporte', cuentaId: ef, fecha: hace(56) });
+  accionAgregarGasto({ descripcion: 'Recibos abril', monto: 225, categoria: 'servicios', cuentaId: bc, fecha: hace(53) });
+  accionAgregarGasto({ descripcion: 'Zapatillas Nike', monto: 450, categoria: 'compras', tarjetaId: tid, fecha: hace(50) });
+  accionAgregarGasto({ descripcion: 'Cena cumpleaños', monto: 120, categoria: 'restaurantes', cuentaId: ya, fecha: hace(48) });
+  // Últimas 4 semanas (los que ya estaban)
+  accionAgregarGasto({ descripcion: 'Supermercado Plaza Vea', monto: 285, categoria: 'alimentacion', cuentaId: bc, fecha: hace(28) });
+  accionAgregarGasto({ descripcion: 'Gasolina', monto: 120, categoria: 'transporte', cuentaId: ef, fecha: hace(27) });
+  accionAgregarGasto({ descripcion: 'Almuerzo con equipo', monto: 65, categoria: 'restaurantes', cuentaId: ya, fecha: hace(25) });
+  accionAgregarGasto({ descripcion: 'Recibo de luz', monto: 95, categoria: 'servicios', cuentaId: bc, fecha: hace(24) });
+  accionAgregarGasto({ descripcion: 'Recibo de agua', monto: 45, categoria: 'servicios', cuentaId: bc, fecha: hace(24) });
+  accionAgregarGasto({ descripcion: 'Internet Movistar', monto: 89, categoria: 'servicios', cuentaId: bc, fecha: hace(23) });
+  accionAgregarGasto({ descripcion: 'Uber ida y vuelta', monto: 38, categoria: 'transporte', cuentaId: ya, fecha: hace(21) });
+  accionAgregarGasto({ descripcion: 'Ropa en Saga', monto: 320, categoria: 'compras', tarjetaId: tid, fecha: hace(20) });
+  accionAgregarGasto({ descripcion: 'Supermercado Metro', monto: 195, categoria: 'alimentacion', cuentaId: bc, fecha: hace(18) });
+  accionAgregarGasto({ descripcion: 'Cine + palomitas', monto: 55, categoria: 'entretenimiento', cuentaId: ef, fecha: hace(16) });
+  accionAgregarGasto({ descripcion: 'Corte de pelo', monto: 35, categoria: 'cuidado_personal', cuentaId: ef, fecha: hace(14) });
+  accionAgregarGasto({ descripcion: 'Amazon audífonos', monto: 180, categoria: 'compras', tarjetaId: tid, fecha: hace(13) });
+  accionAgregarGasto({ descripcion: 'Farmacia', monto: 67, categoria: 'salud', cuentaId: ya, fecha: hace(11) });
+  accionAgregarGasto({ descripcion: 'Supermercado Tottus', monto: 230, categoria: 'alimentacion', cuentaId: bc, fecha: hace(9) });
+  accionAgregarGasto({ descripcion: 'Cena pizzería', monto: 78, categoria: 'restaurantes', cuentaId: ya, fecha: hace(7) });
+  accionAgregarGasto({ descripcion: 'Taxi aeropuerto', monto: 45, categoria: 'transporte', cuentaId: ef, fecha: hace(6) });
+  accionAgregarGasto({ descripcion: 'Regalo cumpleaños mamá', monto: 150, categoria: 'regalos', cuentaId: ya, fecha: hace(4) });
+  accionAgregarGasto({ descripcion: 'Mercado semanal', monto: 160, categoria: 'alimentacion', cuentaId: ef, fecha: hace(2) });
+  accionAgregarGasto({ descripcion: 'Café Starbucks', monto: 22, categoria: 'restaurantes', cuentaId: ya, fecha: hace(1) });
+  accionAgregarGasto({ descripcion: 'Comida mascota', monto: 85, categoria: 'mascotas', cuentaId: bc, fecha: hace(1) });
 
-  accionAgregarPresupuesto({ categoria: 'alimentacion', limite: 600 });
-  accionAgregarPresupuesto({ categoria: 'entretenimiento', limite: 150 });
+  // ── DEUDAS ──
+  accionAgregarDeuda({ nombre: 'Préstamo personal BBVA', montoOriginal: 4000, cuotas: 12, tasaInteres: 3.2, fechaInicio: hace(60) });
+  var deudaId1 = STATE.deudas[STATE.deudas.length - 1].id;
+  accionAbonarDeuda({ deudaId: deudaId1, monto: 400, cuentaId: bc, fecha: hace(30) });
+  accionAbonarDeuda({ deudaId: deudaId1, monto: 400, cuentaId: bc, fecha: hace(5) });
 
+  accionAgregarDeuda({ nombre: 'Crédito celular', montoOriginal: 1200, cuotas: 6, tasaInteres: 1.8, fechaInicio: hace(45) });
+  var deudaId2 = STATE.deudas[STATE.deudas.length - 1].id;
+  accionAbonarDeuda({ deudaId: deudaId2, monto: 200, cuentaId: bc, fecha: hace(15) });
+
+  // ── PAGOS PENDIENTES ──
+  accionAgregarPagoPendiente({ descripcion: 'Alquiler julio', monto: 950, fechaVencimiento: hace(-4), categoria: 'vivienda', recurrente: true });
+  accionAgregarPagoPendiente({ descripcion: 'Seguro vehicular', monto: 180, fechaVencimiento: hace(-10), categoria: 'seguros', recurrente: false });
+  accionAgregarPagoPendiente({ descripcion: 'Cuota gimnasio', monto: 120, fechaVencimiento: hace(-2), categoria: 'cuidado_personal', recurrente: true });
+
+  // ── PRESUPUESTOS ──
+  accionAgregarPresupuesto({ categoria: 'alimentacion', limite: 800 });
+  accionAgregarPresupuesto({ categoria: 'transporte', limite: 250 });
+  accionAgregarPresupuesto({ categoria: 'entretenimiento', limite: 200 });
+  accionAgregarPresupuesto({ categoria: 'restaurantes', limite: 300 });
+  accionAgregarPresupuesto({ categoria: 'compras', limite: 400 });
+
+  // ── METAS DE AHORRO ──
   accionAgregarMeta({ nombre: 'Fondo de emergencia', montoObjetivo: 5000, fechaObjetivo: null });
-  accionAportarMeta({ metaId: STATE.metas[0].id, monto: 800 });
+  accionAportarMeta({ metaId: STATE.metas[0].id, monto: 500, cuentaId: bc });
+  accionAportarMeta({ metaId: STATE.metas[0].id, monto: 300, cuentaId: bc });
 
+  accionAgregarMeta({ nombre: 'Viaje a Cusco', montoObjetivo: 2000, fechaObjetivo: hace(-90) });
+  accionAportarMeta({ metaId: STATE.metas[0].id, monto: 200, cuentaId: ya });
+
+  // ── GASTOS RECURRENTES ──
   accionAgregarGastoRecurrente({ nombre: 'Netflix', monto: 35, categoria: 'suscripciones', diaDelMes: 5 });
-  accionAgregarGastoRecurrente({ nombre: 'Gimnasio', monto: 120, categoria: 'cuidado_personal', diaDelMes: 1 });
+  accionAgregarGastoRecurrente({ nombre: 'Spotify', monto: 18, categoria: 'suscripciones', diaDelMes: 12 });
+  accionAgregarGastoRecurrente({ nombre: 'Gimnasio SmartFit', monto: 120, categoria: 'cuidado_personal', diaDelMes: 1 });
+  accionAgregarGastoRecurrente({ nombre: 'Seguro de salud', monto: 95, categoria: 'seguros', diaDelMes: 20 });
+
+  // ── PRÉSTAMOS OTORGADOS ──
+  accionAgregarPrestamo({ persona: 'Carlos Mendoza', monto: 500, cuentaId: ya, descripcion: 'Emergencia médica', fecha: hace(20) });
+  accionCobrarPrestamo({ prestamoId: STATE.prestamos[0].id, monto: 200, cuentaId: ya, fecha: hace(10), nota: 'Primer abono por Yape' });
+
+  accionAgregarPrestamo({ persona: 'María López', monto: 150, cuentaId: ef, descripcion: 'Para pasajes', fecha: hace(8) });
 
   guardarEstado();
 }

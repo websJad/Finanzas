@@ -416,25 +416,113 @@ a { color: inherit; }
   background: var(--surface);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg);
-  padding: 28px 28px 22px;
+  padding: 24px;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 0;
   flex-wrap: wrap;
 }
 .dash-hero-left { flex: 1; min-width: 200px; }
-.dash-hero-label { display: block; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); margin-bottom: 8px; }
-.dash-hero-valor { font-family: var(--font-mono); font-size: 42px; font-weight: 700; line-height: 1.1; margin-bottom: 8px; }
+.dash-hero-label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); margin-bottom: 6px; }
+.dash-hero-valor { font-family: var(--font-mono); font-size: 38px; font-weight: 700; line-height: 1.1; margin-bottom: 6px; }
 .dash-hero-valor.lima { color: var(--lima); }
 .dash-hero-valor.rojo { color: var(--rojo); }
-.dash-hero-sub { font-size: 12.5px; color: var(--text-faint); }
-.dash-hero-desglose { display: flex; flex-direction: column; gap: 8px; min-width: 220px; }
-.dash-hero-cuenta { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-radius: var(--radius-sm); font-size: 13px; }
-.dash-hero-cuenta .account-chip-icon.sm { width: 26px; height: 26px; min-width: 26px; font-size: 12px; }
-.dash-hero-cuenta span:nth-child(2) { flex: 1; font-weight: 500; }
-.dash-hero-cuenta .mono { font-weight: 600; font-size: 13px; }
+.dash-hero-sub { font-size: 12px; color: var(--text-faint); }
+.dash-hero-desglose {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px;
+  max-width: 400px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.dash-hero-cuenta {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  background: var(--surface-2); border-radius: 6px;
+  font-size: 12px;
+}
+.dash-hero-cuenta .account-chip-icon.sm { width: 22px; height: 22px; min-width: 22px; font-size: 10px; }
+.dash-hero-cuenta span:nth-child(2) { flex: 1; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-hero-cuenta .mono { font-weight: 600; font-size: 12px; white-space: nowrap; }
+
+/* ========================== PIN OVERLAY ========================== */
+#pinOverlay {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg);
+  padding: 20px;
+}
+.pin-card {
+  width: 100%; max-width: 320px;
+  text-align: center;
+}
+.pin-logo {
+  width: 56px; height: 56px; border-radius: 16px;
+  background: linear-gradient(135deg, var(--lima-bg) 0%, rgba(61,220,151,0.2) 100%);
+  color: var(--lima);
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 20px;
+  font-size: 24px; font-weight: 700;
+}
+.pin-title { font-size: 22px; font-weight: 700; margin-bottom: 4px; color: var(--text); }
+.pin-sub { font-size: 13px; color: var(--text-faint); margin-bottom: 28px; }
+.pin-dots {
+  display: flex; justify-content: center; gap: 14px;
+  margin-bottom: 10px;
+}
+.pin-dots span {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid var(--border);
+  transition: all 0.15s ease;
+}
+.pin-dots span.filled {
+  background: var(--lima); border-color: var(--lima);
+  transform: scale(1.1);
+}
+.pin-dots span.correct {
+  background: var(--verde); border-color: var(--verde);
+  transform: scale(1.15);
+}
+.pin-dots span.wrong {
+  background: var(--rojo); border-color: var(--rojo);
+  animation: pinShake 0.4s ease;
+}
+@keyframes pinShake {
+  0%,100% { transform: translateX(0); }
+  20%,60% { transform: translateX(-6px); }
+  40%,80% { transform: translateX(6px); }
+}
+.pin-error {
+  color: var(--rojo); font-size: 13px;
+  height: 20px; margin-bottom: 10px;
+  opacity: 0; transition: opacity 0.2s;
+}
+.pin-error.visible { opacity: 1; }
+.pin-numpad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  max-width: 260px;
+  margin: 0 auto;
+}
+.pin-numpad button {
+  width: 100%; aspect-ratio: 1.4;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all 0.12s ease;
+  display: flex; align-items: center; justify-content: center;
+}
+.pin-numpad button:hover { background: var(--surface-3); }
+.pin-numpad button:active { transform: scale(0.94); background: var(--lima-bg); }
+.pin-del { font-size: 18px !important; }
 
 .waterfall-legend {
   display: flex; flex-wrap: wrap; gap: 14px;
@@ -796,6 +884,11 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
   .view-header { flex-direction: column; }
   .view-header-actions { width: 100%; }
   .view-header-actions .btn { flex: 1; }
+  .dash-hero-disponible { flex-direction: column; padding: 18px; }
+  .dash-hero-valor { font-size: 30px; }
+  .dash-hero-desglose { max-width: 100%; max-height: 100px; grid-template-columns: 1fr 1fr; }
+  .pin-numpad { max-width: 240px; gap: 8px; }
+  .pin-numpad button { font-size: 20px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

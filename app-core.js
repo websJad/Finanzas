@@ -576,6 +576,16 @@ function accionEliminarCuenta(id) {
   guardarEstado();
 }
 
+function accionEditarCuenta({ cuentaId, nombre, tipo, saldoInicial }) {
+  const cuenta = STATE.cuentas.find(c => c.id === cuentaId);
+  if (!cuenta) throw new Error('Cuenta no encontrada.');
+  if (!nombre || !nombre.trim()) throw new Error('El nombre es obligatorio.');
+  cuenta.nombre = nombre.trim();
+  cuenta.tipo = tipo || cuenta.tipo;
+  cuenta.saldoInicial = Number(saldoInicial) || 0;
+  guardarEstado();
+}
+
 function accionAgregarTarjeta({ nombre, limite, diaCorte, diaPago }) {
   if (!nombre || !nombre.trim()) throw new Error('El nombre de la tarjeta es obligatorio.');
   if (!(limite > 0)) throw new Error('El límite debe ser mayor a 0.');

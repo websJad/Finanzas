@@ -1,286 +1,291 @@
 /* =========================================================================
-   SYNC CON GOOGLE SHEETS — TIEMPO REAL v6
+   SYNC CON GOOGLE SHEETS — v7 (CORS fix + verificación)
    =========================================================================
-   Flujo completo:
-   ─ Al CONECTAR: descarga Sheets si tiene datos, si no sube los locales
-   ─ Al CARGAR LA APP: siempre descarga de Sheets (es la fuente de verdad)
-   ─ Al GUARDAR CAMBIO: sube a Sheets inmediatamente
-   ─ Polling 15s: verifica si hay cambios nuevos en Sheets → recarga
-   ─ Al volver a la pestaña: verifica y recarga si hay cambios
+   PROBLEMA ANTERIOR: fetch con Content-Type: application/json dispara un
+   preflight CORS (OPTIONS) que Apps Script NO soporta. La request nunca
+   llega. FIX: enviar sin header Content-Type + verificar con GET después.
    ========================================================================= */
 
-var SYNC_KEY_URL    = 'cofre_sheets_url';
-var SYNC_TIMEOUT_MS = 12000;
-var SYNC_POLL_MS    = 15000;
+var SYNC_KEY     = 'cofre_sheets_url';
+var SYNC_POLL    = 15000;
+var SYNC_TIMEOUT = 12000;
+var _saving      = false;
+var _pollId      = null;
+var _visOk       = false;
 
-var _syncSaving   = false;
-var _syncPolling  = null;
-var _visHandlerOk = false;
-
-/* ─── URL ──────────────────────────────────────────────────── */
-
-function getSheetsUrl()    { return localStorage.getItem(SYNC_KEY_URL) || ''; }
-function setSheetsUrl(url) {
-  url ? localStorage.setItem(SYNC_KEY_URL, url)
-      : localStorage.removeItem(SYNC_KEY_URL);
-}
+/* ── URL ─────────────────────────────────────────────────────── */
+function getSheetsUrl()    { return localStorage.getItem(SYNC_KEY) || ''; }
+function setSheetsUrl(u)   { u ? localStorage.setItem(SYNC_KEY,u) : localStorage.removeItem(SYNC_KEY); }
 function syncHabilitado()  { return !!getSheetsUrl(); }
 
-/* ─── FETCH CON TIMEOUT ────────────────────────────────────── */
-
-function fetchSheet(url, opts) {
-  var ctrl = new AbortController();
-  var timer = setTimeout(function() { ctrl.abort(); }, SYNC_TIMEOUT_MS);
-  return fetch(url, Object.assign({ redirect: 'follow', signal: ctrl.signal }, opts || {}))
-    .then(function(r) { clearTimeout(timer); return r; })
-    .catch(function(e){ clearTimeout(timer); throw e; });
+/* ── Fetch con timeout ───────────────────────────────────────── */
+function sfetch(url, opts) {
+  var c = new AbortController();
+  var t = setTimeout(function(){ c.abort(); }, SYNC_TIMEOUT);
+  return fetch(url, Object.assign({ signal: c.signal, redirect:'follow' }, opts||{}))
+    .then(function(r){ clearTimeout(t); return r; })
+    .catch(function(e){ clearTimeout(t); throw e; });
 }
 
-/* ─── PING ─────────────────────────────────────────────────── */
+/* ── Parsear respuesta (Apps Script redirige, a veces devuelve HTML) ── */
+async function parseResponse(res) {
+  var text = await res.text();
+  try { return JSON.parse(text); }
+  catch(e) {
+    // Apps Script a veces devuelve HTML tras redirect — intentar extraer JSON
+    var match = text.match(/\{[\s\S]*"ok"\s*:/);
+    if (match) {
+      try {
+        var jsonStart = text.indexOf('{');
+        var jsonEnd   = text.lastIndexOf('}');
+        if (jsonStart >= 0 && jsonEnd > jsonStart)
+          return JSON.parse(text.substring(jsonStart, jsonEnd+1));
+      } catch(e2) {}
+    }
+    return null;
+  }
+}
 
+/* ── PING ────────────────────────────────────────────────────── */
 async function syncPing(url) {
-  var res  = await fetchSheet(url + '?action=ping');
-  var json = await res.json().catch(function() {
-    throw new Error('La URL no devolvió JSON válido. Revisa que el Apps Script esté bien desplegado.');
-  });
-  if (!json.ok) throw new Error(json.error || 'Error en el backend');
+  console.log('[Sync] Ping a', url);
+  var res  = await sfetch(url + '?action=ping');
+  var json = await parseResponse(res);
+  if (!json) throw new Error('URL inválida — no devolvió JSON');
+  if (!json.ok) throw new Error(json.error || 'Backend error');
+  console.log('[Sync] Ping OK', json);
   return json;
 }
 
-/* ─── CARGAR DESDE SHEETS ──────────────────────────────────── */
-
+/* ── CARGAR (GET — siempre funciona con CORS) ────────────────── */
 async function syncCargar() {
   var url = getSheetsUrl();
   if (!url) return null;
-  var res  = await fetchSheet(url + '?action=load');
-  var json = await res.json();
-  if (!json.ok) throw new Error(json.error || 'Error al cargar datos');
-  return json.data || null; // null = Sheets está vacío todavía
+  console.log('[Sync] Cargando desde Sheets...');
+  var res  = await sfetch(url + '?action=load');
+  var json = await parseResponse(res);
+  if (!json) { console.warn('[Sync] Load: respuesta no JSON'); return null; }
+  if (!json.ok) { console.warn('[Sync] Load error:', json.error); return null; }
+  console.log('[Sync] Cargado OK, tiene datos:', !!json.data);
+  return json.data || null;
 }
 
-/* ─── GUARDAR EN SHEETS ────────────────────────────────────── */
-
+/* ── GUARDAR (POST sin Content-Type para evitar CORS preflight) ── */
 async function syncGuardarAhora(state) {
   var url = getSheetsUrl();
-  if (!url) return false;
-
-  // Si hay un guardado en curso, esperar un momento y reintentar
-  if (_syncSaving) {
-    setTimeout(function() { syncGuardarAhora(state); }, 2000);
-    return false;
-  }
-
-  _syncSaving = true;
+  if (!url || _saving) return false;
+  _saving = true;
   setBadgeSync('saving');
+  console.log('[Sync] Guardando en Sheets... ts:', state._ts);
 
   try {
-    var res  = await fetchSheet(url + '?action=save', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ data: state }),
+    // IMPORTANTE: NO enviar Content-Type header para evitar CORS preflight
+    // Apps Script lee e.postData.contents igualmente
+    var res = await sfetch(url + '?action=save', {
+      method: 'POST',
+      body: JSON.stringify({ data: state }),
+      // SIN headers de Content-Type
     });
-    var json = await res.json();
-    if (!json.ok) throw new Error(json.error || 'Error al guardar');
-    setBadgeSync('ok');
-    return true;
+    var json = await parseResponse(res);
+
+    if (json && json.ok) {
+      console.log('[Sync] Guardado OK, savedAt:', json.savedAt);
+      setBadgeSync('ok');
+      _saving = false;
+      return true;
+    }
+
+    // Si no pudimos leer la respuesta JSON (redirect de Apps Script),
+    // verificamos con un GET que los datos realmente se guardaron
+    console.log('[Sync] Respuesta no clara, verificando con GET...');
+    var check = await syncCargar();
+    if (check && check._ts === state._ts) {
+      console.log('[Sync] Verificación OK — datos guardados correctamente');
+      setBadgeSync('ok');
+      _saving = false;
+      return true;
+    }
+
+    console.warn('[Sync] No se pudo verificar el guardado');
+    setBadgeSync('error');
+    _saving = false;
+    return false;
+
   } catch(e) {
     console.warn('[Sync] Error al guardar:', e.message);
     setBadgeSync('error');
+    _saving = false;
     return false;
-  } finally {
-    _syncSaving = false;
   }
 }
 
-// Llamada desde guardarEstado() en app-core.js
-function syncGuardar(state) {
-  syncGuardarAhora(state);
-}
+// Alias
+function syncGuardar(state) { syncGuardarAhora(state); }
 
-/* ─── APLICAR DATOS DE SHEETS Y REFRESCAR UI ──────────────── */
-
+/* ── Aplicar datos de Sheets y refrescar toda la UI ──────────── */
 function aplicarDatosSheets(datos) {
-  aplicarEstadoCargado(datos);  // actualiza STATE + localStorage
+  console.log('[Sync] Aplicando datos de Sheets, ts:', datos._ts);
+  aplicarEstadoCargado(datos);
   aplicarTema();
   actualizarTopbarYBadges();
-  refrescarVistaActual();       // redibuja la vista actual con los nuevos datos
+  refrescarVistaActual();
   setBadgeSync('ok');
 }
 
-/* ─── CARGA INICIAL (al abrir la app) ─────────────────────── */
+/* ── CONECTAR (primer uso o nuevo dispositivo) ───────────────── */
+async function sincronizarAlConectar(url) {
+  setBadgeSync('loading');
+  console.log('[Sync] Conectando a:', url);
 
+  // 1. Verificar que responde
+  await syncPing(url);
+  setSheetsUrl(url);
+
+  // 2. Intentar cargar datos de Sheets
+  var datosSheets = null;
+  try { datosSheets = await syncCargar(); } catch(e) {}
+
+  if (datosSheets && datosSheets._ts) {
+    var tsS = new Date(datosSheets._ts).getTime();
+    var tsL = STATE._ts ? new Date(STATE._ts).getTime() : 0;
+
+    if (tsS > tsL) {
+      // Sheets más nuevo → descargar (otro dispositivo ya tenía datos)
+      console.log('[Sync] Sheets tiene datos más nuevos, cargando...');
+      aplicarDatosSheets(datosSheets);
+      toast('✓ Datos cargados desde Google Sheets.', 'success');
+    } else {
+      // Local más nuevo → subir
+      console.log('[Sync] Datos locales más nuevos, subiendo...');
+      var ok = await syncGuardarAhora(STATE);
+      toast(ok ? '✓ Datos subidos a Google Sheets.' : '⚠ Error al subir datos.', ok ? 'success' : 'warning');
+    }
+  } else if (STATE.cuentas && STATE.cuentas.length > 0) {
+    // Sheets vacío pero tengo datos locales → subir
+    console.log('[Sync] Sheets vacío, subiendo datos locales...');
+    var ok = await syncGuardarAhora(STATE);
+    toast(ok ? '✓ Datos subidos a Google Sheets.' : '⚠ Error al subir datos.', ok ? 'success' : 'warning');
+  } else {
+    // Todo vacío
+    setBadgeSync('ok');
+    toast('✓ Conectado. Google Sheets listo para recibir datos.', 'success');
+  }
+
+  // 3. Arrancar polling y detección de visibilidad
+  iniciarPolling();
+  configurarSyncVisibilidad();
+}
+
+/* ── CARGA INICIAL (al abrir la app si ya estaba conectado) ─── */
 async function syncCargaInicial() {
   if (!syncHabilitado()) { setBadgeSync('off'); return; }
-
   setBadgeSync('loading');
+  console.log('[Sync] Carga inicial...');
+
   try {
     var datosSheets = await syncCargar();
 
     if (!datosSheets) {
-      // Sheets vacío → subir los datos locales para que estén disponibles
-      // en todos los dispositivos
-      console.log('[Sync] Sheets vacío, subiendo datos locales...');
-      await syncGuardarAhora(STATE);
+      // Sheets vacío → subir datos locales si los hay
+      if (STATE.cuentas && STATE.cuentas.length > 0) {
+        console.log('[Sync] Sheets vacío, subiendo datos locales...');
+        await syncGuardarAhora(STATE);
+      } else {
+        setBadgeSync('ok');
+      }
       return;
     }
 
-    // Sheets tiene datos — comparo timestamps
-    var tsSheets = datosSheets._ts ? new Date(datosSheets._ts).getTime() : 0;
-    var tsLocal  = STATE._ts       ? new Date(STATE._ts).getTime()       : 0;
+    var tsS = datosSheets._ts ? new Date(datosSheets._ts).getTime() : 0;
+    var tsL = STATE._ts ? new Date(STATE._ts).getTime() : 0;
 
-    if (tsSheets > tsLocal) {
-      // Sheets es más nuevo → aplicar (caso: abrir en otro dispositivo)
-      console.log('[Sync] Cargando datos más nuevos de Sheets...');
+    if (tsS > tsL) {
+      console.log('[Sync] Sheets más nuevo ('+new Date(tsS).toLocaleTimeString()+' vs '+new Date(tsL).toLocaleTimeString()+'), aplicando...');
       aplicarDatosSheets(datosSheets);
-    } else if (tsLocal > tsSheets) {
-      // Local es más nuevo → subir (caso: hice cambios offline)
-      console.log('[Sync] Subiendo datos locales más nuevos a Sheets...');
+    } else if (tsL > tsS) {
+      console.log('[Sync] Local más nuevo, subiendo...');
       await syncGuardarAhora(STATE);
     } else {
-      // Iguales → todo OK
+      console.log('[Sync] Datos sincronizados.');
       setBadgeSync('ok');
     }
   } catch(e) {
-    console.warn('[Sync] Error en carga inicial:', e.message);
+    console.warn('[Sync] Error carga inicial:', e.message);
     setBadgeSync('error');
   }
 }
 
-/* ─── AL CONECTAR (primer dispositivo o nuevo dispositivo) ─── */
-
-async function sincronizarAlConectar(url) {
-  setBadgeSync('loading');
-  try {
-    // 1. Verificar que el backend responde
-    await syncPing(url);
-    setSheetsUrl(url);
-
-    // 2. Ver qué hay en Sheets
-    var datosSheets = await syncCargar();
-
-    if (datosSheets && datosSheets._ts) {
-      var tsSheets = new Date(datosSheets._ts).getTime();
-      var tsLocal  = STATE._ts ? new Date(STATE._ts).getTime() : 0;
-
-      if (tsSheets > tsLocal) {
-        // Sheets tiene datos más nuevos (el otro dispositivo ya tenía datos)
-        aplicarDatosSheets(datosSheets);
-        toast('✓ Datos cargados desde Google Sheets.', 'success');
-      } else {
-        // Mis datos locales son más nuevos → subirlos
-        await syncGuardarAhora(STATE);
-        toast('✓ Datos subidos a Google Sheets.', 'success');
-      }
-    } else {
-      // Sheets vacío → subir mis datos locales
-      await syncGuardarAhora(STATE);
-      toast('✓ Conectado. Datos guardados en Google Sheets.', 'success');
-    }
-
-    // 3. Arrancar el polling y el listener de visibilidad
-    iniciarPolling();
-    configurarSyncVisibilidad();
-
-  } catch(e) {
-    setSheetsUrl(''); // revertir si falló
-    setBadgeSync('error');
-    throw e; // re-lanzar para que el botón muestre el error
-  }
-}
-
-/* ─── POLLING CADA 15 SEGUNDOS ─────────────────────────────── */
-
+/* ── POLLING cada 15s ────────────────────────────────────────── */
 function iniciarPolling() {
   detenerPolling();
-  _syncPolling = setInterval(async function() {
-    if (!syncHabilitado() || _syncSaving) return;
+  _pollId = setInterval(async function() {
+    if (!syncHabilitado() || _saving) return;
     try {
-      var url     = getSheetsUrl();
-      var resPing = await fetchSheet(url + '?action=ping');
-      var ping    = await resPing.json();
-      if (!ping.ok || !ping.lastSaved) return;
+      // Ping para ver timestamp sin descargar todo
+      var url  = getSheetsUrl();
+      var res  = await sfetch(url + '?action=ping');
+      var ping = await parseResponse(res);
+      if (!ping || !ping.ok || !ping.lastSaved) return;
 
-      var tsSheets = new Date(ping.lastSaved).getTime();
-      var tsLocal  = STATE._ts ? new Date(STATE._ts).getTime() : 0;
+      var tsS = new Date(ping.lastSaved).getTime();
+      var tsL = STATE._ts ? new Date(STATE._ts).getTime() : 0;
 
-      if (tsSheets > tsLocal + 2000) {
-        // Hay datos nuevos en Sheets → descargar y aplicar
-        console.log('[Sync] Polling: datos nuevos detectados, descargando...');
+      if (tsS > tsL + 2000) {
+        console.log('[Sync] Polling: cambios detectados, descargando...');
         var datos = await syncCargar();
-        if (!datos) return;
-        aplicarDatosSheets(datos);
-        toast('↻ Datos actualizados desde otro dispositivo.', 'info');
+        if (datos) {
+          aplicarDatosSheets(datos);
+          toast('↻ Datos actualizados desde otro dispositivo.', 'info');
+        }
       }
     } catch(e) {
-      // Error silencioso en polling — no interrumpir al usuario
-      setBadgeSync('error');
+      // Silencioso
     }
-  }, SYNC_POLL_MS);
+  }, SYNC_POLL);
 }
+function detenerPolling() { if (_pollId) { clearInterval(_pollId); _pollId = null; } }
 
-function detenerPolling() {
-  if (_syncPolling) { clearInterval(_syncPolling); _syncPolling = null; }
-}
-
-/* ─── SYNC AL VOLVER A LA PESTAÑA ──────────────────────────── */
-
+/* ── Sync al volver a la pestaña ─────────────────────────────── */
 function configurarSyncVisibilidad() {
-  if (_visHandlerOk) return; // evitar duplicar el listener
-  _visHandlerOk = true;
+  if (_visOk) return;
+  _visOk = true;
   document.addEventListener('visibilitychange', async function() {
-    if (document.visibilityState !== 'visible' || !syncHabilitado()) return;
+    if (document.visibilityState !== 'visible' || !syncHabilitado() || _saving) return;
     try {
-      var url     = getSheetsUrl();
-      var resPing = await fetchSheet(url + '?action=ping');
-      var ping    = await resPing.json();
-      if (!ping.ok || !ping.lastSaved) return;
-
-      var tsSheets = new Date(ping.lastSaved).getTime();
-      var tsLocal  = STATE._ts ? new Date(STATE._ts).getTime() : 0;
-
-      if (tsSheets > tsLocal + 2000) {
+      var url  = getSheetsUrl();
+      var res  = await sfetch(url + '?action=ping');
+      var ping = await parseResponse(res);
+      if (!ping || !ping.ok || !ping.lastSaved) return;
+      var tsS = new Date(ping.lastSaved).getTime();
+      var tsL = STATE._ts ? new Date(STATE._ts).getTime() : 0;
+      if (tsS > tsL + 2000) {
         var datos = await syncCargar();
-        if (!datos) return;
-        aplicarDatosSheets(datos);
-        toast('↻ Datos actualizados al volver a la app.', 'info');
+        if (datos) {
+          aplicarDatosSheets(datos);
+          toast('↻ Datos actualizados al volver.', 'info');
+        }
       }
-    } catch(e) {
-      console.warn('[Sync] Error al volver a la app:', e.message);
-    }
+    } catch(e) {}
   });
 }
 
-/* ─── BADGE EN TOPBAR ───────────────────────────────────────── */
-
+/* ── Badge de estado ─────────────────────────────────────────── */
 function setBadgeSync(estado) {
-  var badge = document.getElementById('syncBadge');
-  if (!badge) return;
-
-  var cfgs = {
-    loading: { color: '#5B9FFF', icon: '⟳', title: 'Sincronizando...' },
-    saving:  { color: '#5B9FFF', icon: '⟳', title: 'Guardando en Sheets...' },
-    ok:      { color: '#3DDC97', icon: '●', title: 'Sincronizado con Google Sheets' },
-    error:   { color: '#FFA94D', icon: '●', title: 'Sin conexión — guardado localmente' },
-    off:     { color: '#555',    icon: '○', title: 'Google Sheets no configurado' },
-  };
-  var cfg = cfgs[estado] || cfgs.off;
-  badge.style.color   = cfg.color;
-  badge.title         = cfg.title;
-  badge.textContent   = cfg.icon;
-
+  var b = document.getElementById('syncBadge');
+  if (!b) return;
+  var m = {
+    loading:{c:'#5B9FFF',i:'⟳',t:'Sincronizando...'},
+    saving: {c:'#5B9FFF',i:'⟳',t:'Guardando...'},
+    ok:     {c:'#3DDC97',i:'●',t:'Sincronizado'},
+    error:  {c:'#FFA94D',i:'●',t:'Sin conexión'},
+    off:    {c:'#555',   i:'○',t:'No conectado'},
+  }[estado]||{c:'#555',i:'○',t:''};
+  b.style.color=m.c; b.textContent=m.i; b.title=m.t;
   var ind = document.getElementById('syncIndicator');
-  if (ind) {
-    var txts = {
-      loading: 'Sincronizando...', saving: 'Guardando en Sheets...',
-      ok: '● Sincronizado', error: '⚠ Sin conexión (datos locales)', off: '○ Sin conectar',
-    };
-    ind.textContent   = txts[estado] || '';
-    ind.style.color   = cfg.color;
-  }
+  if(ind){ ind.textContent=m.i+' '+m.t; ind.style.color=m.c; }
 }
 
-/* ─── INICIO (llamado desde app-main.js) ───────────────────── */
-
+/* ── Inicio ──────────────────────────────────────────────────── */
 async function iniciarSistemaSync() {
   if (!syncHabilitado()) { setBadgeSync('off'); return; }
   await syncCargaInicial();
