@@ -183,6 +183,7 @@ function refrescarVistaActual() {
 function actualizarTopbarYBadges() {
   document.getElementById('topbarSaldo').textContent = formatoMoneda(saldoDisponibleReal());
 
+  // Badge de pagos pendientes en la sidebar
   const pendientesUrgentes = STATE.pagosPendientes.filter(p =>
     p.estado === 'pendiente' && diasHastaVencimiento(p.fechaVencimiento) <= 7
   );
@@ -194,8 +195,15 @@ function actualizarTopbarYBadges() {
     badgeNav.hidden = true;
   }
 
+  // Badge de notificaciones en la campana (usa el sistema completo)
   const notifBadge = document.getElementById('notifBadge');
-  notifBadge.hidden = pendientesUrgentes.length === 0;
+  if (typeof contarNotificacionesUrgentes === 'function') {
+    var count = contarNotificacionesUrgentes();
+    notifBadge.hidden = count === 0;
+    notifBadge.textContent = count > 0 ? count : '';
+  } else {
+    notifBadge.hidden = pendientesUrgentes.length === 0;
+  }
 }
 
 /* ------------------------------ SIDEBAR MOBILE ----------------------------- */

@@ -87,14 +87,16 @@ function cardPrestamo(p) {
   const pendiente = saldoPendientePrestamo(p);
   const pct = p.montoOriginal > 0 ? Math.min((cobrado / p.montoOriginal) * 100, 100) : 0;
   const cobradoTotal = p.estado === 'cobrado';
-  const cuenta = STATE.cuentas.find(c => c.id === p.cuentaId);
+  const cuenta = p.cuentaId ? STATE.cuentas.find(c => c.id === p.cuentaId) : null;
 
   return `
     <div class="card" style="${cobradoTotal ? 'opacity:0.75;' : ''}">
       <div class="flex-between" style="margin-bottom:10px;">
         <div>
           <div style="font-weight:700; font-size:15px;">${p.persona}</div>
-          <div class="text-faint" style="font-size:11.5px;">${formatoFecha(p.fecha)} · desde ${cuenta ? cuenta.nombre : '—'}</div>
+          <div class="text-faint" style="font-size:11.5px;">
+            ${formatoFecha(p.fecha)}${cuenta ? ' · desde ' + cuenta.nombre : ''}${p.yaDescontado ? ' · <span class="pill pill-azul" style="font-size:10px;">anterior</span>' : ''}
+          </div>
         </div>
         <div style="display:flex; gap:4px;">
           <button class="btn btn-sm btn-ghost" data-historial-prestamo="${p.id}" title="Ver historial">${icon('book')}</button>
@@ -135,7 +137,16 @@ function abrirModalNuevoPrestamo() {
         <label>Monto prestado</label>
         <input type="number" name="monto" step="0.01" min="0.01" placeholder="0.00" required>
       </div>
-      <div class="field">
+
+      <div class="field" style="margin-bottom:12px;">
+        <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
+          <input type="checkbox" id="chkYaDescontado" name="yaDescontado" style="width:18px; height:18px; accent-color:var(--lima);">
+          <span style="font-size:13px; font-weight:500;">Este préstamo fue antes de usar la app</span>
+        </label>
+        <p class="field-hint" id="hintYaDescontado" style="display:none; margin-top:6px;">No se descontará de ninguna cuenta porque el dinero ya salió antes de registrar tus saldos aquí.</p>
+      </div>
+
+      <div id="campoCuentaPrestamo" class="field">
         <label>Desde qué cuenta / billetera</label>
         <select name="cuentaId">${opcionesCuentas()}</select>
       </div>
@@ -147,17 +158,31 @@ function abrirModalNuevoPrestamo() {
         <label>Fecha del préstamo</label>
         <input type="date" name="fecha" value="${hoyISO()}">
       </div>
-      <p class="field-hint" style="margin-bottom:14px;">El monto se descontará de la cuenta seleccionada y aparecerá como gasto. Cuando cobres, entra como ingreso.</p>
+      <p class="field-hint" id="hintDescuento" style="margin-bottom:14px;">El monto se descontará de la cuenta seleccionada y aparecerá como gasto. Cuando cobres, entra como ingreso.</p>
       <button type="submit" class="btn btn-primary btn-block">Registrar préstamo</button>
     </form>
   `, (body) => {
+    var chk = body.querySelector('#chkYaDescontado');
+    var campoCuenta = body.querySelector('#campoCuentaPrestamo');
+    var hintDesc = body.querySelector('#hintDescuento');
+    var hintYa = body.querySelector('#hintYaDescontado');
+
+    chk.addEventListener('change', function() {
+      campoCuenta.style.display = chk.checked ? 'none' : '';
+      hintDesc.style.display = chk.checked ? 'none' : '';
+      hintYa.style.display = chk.checked ? '' : 'none';
+    });
+
     body.querySelector('#formPrestamo').addEventListener('submit', (e) => {
       e.preventDefault();
       manejarError(() => {
         const datos = leerForm(e.target, ['persona', 'monto', 'cuentaId', 'descripcion', 'fecha']);
+        datos.yaDescontado = chk.checked;
         accionAgregarPrestamo(datos);
         cerrarModal();
-        toast('Préstamo registrado. El monto fue descontado de tu cuenta.', 'success');
+        toast(chk.checked
+          ? 'Préstamo registrado (sin afectar tus cuentas).'
+          : 'Préstamo registrado. Monto descontado de tu cuenta.', 'success');
         refrescarVistaActual();
       });
     });

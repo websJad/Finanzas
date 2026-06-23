@@ -1,6 +1,41 @@
 /* =========================================================================
-   VISTA: TARJETAS
+   VISTA: TARJETAS — con fechas de corte/pago por calendario
    ========================================================================= */
+
+// Helper: convertir día antiguo (número) a próxima fecha
+function proximaFechaDesde(dia) {
+  if (!dia) return '';
+  // Si ya es una fecha ISO, devolverla
+  if (String(dia).includes('-')) return String(dia);
+  // Convertir número de día a la próxima fecha con ese día
+  var hoy = new Date();
+  var mes = hoy.getMonth();
+  var anio = hoy.getFullYear();
+  var fecha = new Date(anio, mes, Number(dia));
+  if (fecha <= hoy) fecha = new Date(anio, mes + 1, Number(dia));
+  return fecha.toISOString().slice(0, 10);
+}
+
+// Helper: mostrar fecha corta legible
+function fechaCorta(fecha) {
+  if (!fecha) return '—';
+  var str = String(fecha);
+  if (!str.includes('-')) return 'día ' + str;
+  try {
+    var d = new Date(str + 'T12:00:00');
+    return d.toLocaleDateString('es-PE', { day: 'numeric', month: 'short' });
+  } catch(e) { return str; }
+}
+
+// Helper: días restantes hasta una fecha
+function diasHasta(fecha) {
+  if (!fecha) return 999;
+  var str = String(fecha);
+  if (!str.includes('-')) return 999;
+  var hoy = new Date(); hoy.setHours(0,0,0,0);
+  var target = new Date(str + 'T12:00:00'); target.setHours(0,0,0,0);
+  return Math.ceil((target - hoy) / 86400000);
+}
 
 function renderTarjetas() {
   const main = document.getElementById('mainContent');
@@ -9,7 +44,7 @@ function renderTarjetas() {
     <div class="view-header">
       <div>
         <h1>Tarjetas</h1>
-        <p class="view-sub">Límite, consumo, disponible y alertas de corte y pago mínimo</p>
+        <p class="view-sub">Límite, consumo, disponible y alertas de corte y pago</p>
       </div>
       <div class="view-header-actions">
         <button class="btn btn-primary" id="btnNuevaTarjeta">${icon('check')} Nueva tarjeta</button>
@@ -24,36 +59,32 @@ function renderTarjetas() {
 
   main.querySelector('#btnNuevaTarjeta')?.addEventListener('click', abrirModalTarjeta);
   main.querySelector('#btnEmptyTarjeta')?.addEventListener('click', abrirModalTarjeta);
-
-  main.querySelectorAll('[data-pagar-tarjeta]').forEach(btn => {
-    btn.addEventListener('click', () => abrirModalPagoTarjeta(btn.dataset.pagarTarjeta));
-  });
-  main.querySelectorAll('[data-editar-tarjeta]').forEach(btn => {
-    btn.addEventListener('click', () => abrirModalEditarTarjeta(btn.dataset.editarTarjeta));
-  });
+  main.querySelectorAll('[data-pagar-tarjeta]').forEach(btn => btn.addEventListener('click', () => abrirModalPagoTarjeta(btn.dataset.pagarTarjeta)));
+  main.querySelectorAll('[data-editar-tarjeta]').forEach(btn => btn.addEventListener('click', () => abrirModalEditarTarjeta(btn.dataset.editarTarjeta)));
   main.querySelectorAll('[data-eliminar-tarjeta]').forEach(btn => {
     btn.addEventListener('click', () => {
       confirmar('¿Eliminar esta tarjeta? Solo es posible si no tiene gastos asociados.', () => {
-        manejarError(() => {
-          accionEliminarTarjeta(btn.dataset.eliminarTarjeta);
-          toast('Tarjeta eliminada.', 'success');
-          refrescarVistaActual();
-        });
+        manejarError(() => { accionEliminarTarjeta(btn.dataset.eliminarTarjeta); toast('Tarjeta eliminada.', 'success'); refrescarVistaActual(); });
       }, { danger: true, okLabel: 'Eliminar' });
     });
   });
 }
 
 function cardTarjeta(t) {
-  const disponible = t.limite - t.consumoActual;
-  const pctUsado = t.limite > 0 ? (t.consumoActual / t.limite) * 100 : 0;
-  const critico = pctUsado >= 80;
+  var disponible = t.limite - t.consumoActual;
+  var pctUsado = t.limite > 0 ? (t.consumoActual / t.limite) * 100 : 0;
+  var critico = pctUsado >= 80;
+  var diasCorte = diasHasta(t.fechaCorte || proximaFechaDesde(t.diaCorte));
+  var diasPago  = diasHasta(t.fechaPago  || proximaFechaDesde(t.diaPago));
+  var alertaCorte = diasCorte >= 0 && diasCorte <= 3;
+  var alertaPago  = diasPago >= 0 && diasPago <= 3;
+
   return `
     <div class="card-credit">
       <div class="card-credit-top">
         <div>
           <div class="card-credit-name">${t.nombre}</div>
-          <div class="card-credit-limit">Límite ${formatoMoneda(t.limite)} · corte día ${t.diaCorte}</div>
+          <div class="card-credit-limit">Límite ${formatoMoneda(t.limite)}</div>
         </div>
         <div style="display:flex; gap:4px;">
           <button class="btn btn-sm btn-ghost" data-editar-tarjeta="${t.id}" title="Editar">${icon('edit')}</button>
@@ -72,7 +103,11 @@ function cardTarjeta(t) {
           <span class="card-credit-amount" style="color:${critico ? 'var(--rojo)' : 'var(--naranja)'};">${formatoMoneda(t.consumoActual)}</span>
           <button class="btn btn-sm btn-primary" data-pagar-tarjeta="${t.id}">Pagar tarjeta</button>
         </div>
-        <div class="text-faint" style="font-size:11.5px; margin-top:6px;">Disponible: ${formatoMoneda(disponible)} · pago día ${t.diaPago}</div>
+        <div class="text-faint" style="font-size:11.5px; margin-top:6px;">Disponible: ${formatoMoneda(disponible)}</div>
+        <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+          <span class="pill ${alertaCorte ? 'pill-naranja' : 'pill-gris'}" style="font-size:10.5px;">Corte: ${fechaCorta(t.fechaCorte || t.diaCorte)}${alertaCorte ? ' · en ' + diasCorte + 'd' : ''}</span>
+          <span class="pill ${alertaPago ? 'pill-rojo' : 'pill-gris'}" style="font-size:10.5px;">Pago: ${fechaCorta(t.fechaPago || t.diaPago)}${alertaPago ? ' · en ' + diasPago + 'd' : ''}</span>
+        </div>
         ${critico ? `<div class="pill pill-rojo" style="margin-top:8px;">${icon('alert-triangle')} Cerca del límite</div>` : ''}
       </div>
     </div>
@@ -92,12 +127,12 @@ function abrirModalTarjeta() {
       </div>
       <div class="field-row">
         <div class="field">
-          <label>Día de corte</label>
-          <input type="number" name="diaCorte" min="1" max="31" value="1">
+          <label>Próxima fecha de corte</label>
+          <input type="date" name="fechaCorte" required>
         </div>
         <div class="field">
-          <label>Día de pago</label>
-          <input type="number" name="diaPago" min="1" max="31" value="15">
+          <label>Próxima fecha de pago</label>
+          <input type="date" name="fechaPago" required>
         </div>
       </div>
       <button type="submit" class="btn btn-primary btn-block">Crear tarjeta</button>
@@ -106,20 +141,20 @@ function abrirModalTarjeta() {
     body.querySelector('#formTarjeta').addEventListener('submit', (e) => {
       e.preventDefault();
       manejarError(() => {
-        const datos = leerForm(e.target, ['nombre', 'limite', 'diaCorte', 'diaPago']);
-        accionAgregarTarjeta(datos);
-        cerrarModal();
-        toast('Tarjeta agregada.', 'success');
-        refrescarVistaActual();
+        var datos = leerForm(e.target, ['nombre', 'limite', 'fechaCorte', 'fechaPago']);
+        accionAgregarTarjeta({ nombre: datos.nombre, limite: datos.limite, fechaCorte: datos.fechaCorte, fechaPago: datos.fechaPago });
+        cerrarModal(); toast('Tarjeta agregada.', 'success'); refrescarVistaActual();
       });
     });
   });
 }
 
 function abrirModalEditarTarjeta(tarjetaId) {
-  const t = STATE.tarjetas.find(x => x.id === tarjetaId);
+  var t = STATE.tarjetas.find(function(x) { return x.id === tarjetaId; });
   if (!t) return;
-  abrirModal(`Editar ${t.nombre}`, `
+  var fc = t.fechaCorte || proximaFechaDesde(t.diaCorte);
+  var fp = t.fechaPago  || proximaFechaDesde(t.diaPago);
+  abrirModal('Editar ' + t.nombre, `
     <form id="formEditarTarjeta">
       <div class="field">
         <label>Nombre</label>
@@ -131,12 +166,12 @@ function abrirModalEditarTarjeta(tarjetaId) {
       </div>
       <div class="field-row">
         <div class="field">
-          <label>Día de corte</label>
-          <input type="number" name="diaCorte" min="1" max="31" value="${t.diaCorte}">
+          <label>Próxima fecha de corte</label>
+          <input type="date" name="fechaCorte" value="${fc}">
         </div>
         <div class="field">
-          <label>Día de pago</label>
-          <input type="number" name="diaPago" min="1" max="31" value="${t.diaPago}">
+          <label>Próxima fecha de pago</label>
+          <input type="date" name="fechaPago" value="${fp}">
         </div>
       </div>
       <button type="submit" class="btn btn-primary btn-block">Guardar cambios</button>
@@ -145,20 +180,18 @@ function abrirModalEditarTarjeta(tarjetaId) {
     body.querySelector('#formEditarTarjeta').addEventListener('submit', (e) => {
       e.preventDefault();
       manejarError(() => {
-        const datos = leerForm(e.target, ['nombre', 'limite', 'diaCorte', 'diaPago']);
-        accionEditarTarjeta({ tarjetaId, ...datos });
-        cerrarModal();
-        toast('Tarjeta actualizada.', 'success');
-        refrescarVistaActual();
+        var datos = leerForm(e.target, ['nombre', 'limite', 'fechaCorte', 'fechaPago']);
+        accionEditarTarjeta({ tarjetaId: tarjetaId, nombre: datos.nombre, limite: datos.limite, fechaCorte: datos.fechaCorte, fechaPago: datos.fechaPago });
+        cerrarModal(); toast('Tarjeta actualizada.', 'success'); refrescarVistaActual();
       });
     });
   });
 }
 
 function abrirModalPagoTarjeta(tarjetaId) {
-  const tarjeta = STATE.tarjetas.find(t => t.id === tarjetaId);
+  var tarjeta = STATE.tarjetas.find(function(t) { return t.id === tarjetaId; });
   if (!tarjeta) return;
-  abrirModal(`Pagar ${tarjeta.nombre}`, `
+  abrirModal('Pagar ' + tarjeta.nombre, `
     <form id="formPagoTarjeta">
       <p class="field-hint" style="margin-bottom:16px;">Deuda actual: <strong>${formatoMoneda(tarjeta.consumoActual)}</strong></p>
       <div class="field">
@@ -175,11 +208,9 @@ function abrirModalPagoTarjeta(tarjetaId) {
     body.querySelector('#formPagoTarjeta').addEventListener('submit', (e) => {
       e.preventDefault();
       manejarError(() => {
-        const datos = leerForm(e.target, ['monto', 'cuentaId']);
-        accionPagarTarjeta({ tarjetaId, ...datos });
-        cerrarModal();
-        toast('Pago de tarjeta registrado.', 'success');
-        refrescarVistaActual();
+        var datos = leerForm(e.target, ['monto', 'cuentaId']);
+        accionPagarTarjeta({ tarjetaId: tarjetaId, monto: datos.monto, cuentaId: datos.cuentaId });
+        cerrarModal(); toast('Pago de tarjeta registrado.', 'success'); refrescarVistaActual();
       });
     });
   });

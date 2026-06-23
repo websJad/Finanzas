@@ -34,9 +34,35 @@ const CATEGORIAS_GASTO = [
 ];
 
 const MONEDAS = {
-  PEN: { simbolo: 'S/', nombre: 'Sol peruano' },
-  USD: { simbolo: '$', nombre: 'Dólar estadounidense' },
-  EUR: { simbolo: '€', nombre: 'Euro' },
+  // Latinoamérica
+  PEN: { simbolo: 'S/',  nombre: 'Sol peruano' },
+  MXN: { simbolo: '$',   nombre: 'Peso mexicano' },
+  COP: { simbolo: '$',   nombre: 'Peso colombiano' },
+  ARS: { simbolo: '$',   nombre: 'Peso argentino' },
+  CLP: { simbolo: '$',   nombre: 'Peso chileno' },
+  BRL: { simbolo: 'R$',  nombre: 'Real brasileño' },
+  BOB: { simbolo: 'Bs',  nombre: 'Boliviano' },
+  UYU: { simbolo: '$U',  nombre: 'Peso uruguayo' },
+  PYG: { simbolo: '₲',   nombre: 'Guaraní paraguayo' },
+  VES: { simbolo: 'Bs.S', nombre: 'Bolívar venezolano' },
+  CRC: { simbolo: '₡',   nombre: 'Colón costarricense' },
+  PAB: { simbolo: 'B/.',  nombre: 'Balboa panameño' },
+  DOP: { simbolo: 'RD$',  nombre: 'Peso dominicano' },
+  GTQ: { simbolo: 'Q',    nombre: 'Quetzal guatemalteco' },
+  HNL: { simbolo: 'L',    nombre: 'Lempira hondureño' },
+  NIO: { simbolo: 'C$',   nombre: 'Córdoba nicaragüense' },
+  CUP: { simbolo: '$MN',  nombre: 'Peso cubano' },
+  HTG: { simbolo: 'G',    nombre: 'Gourde haitiano' },
+  SVC: { simbolo: '$',    nombre: 'Dólar salvadoreño' },
+  BZD: { simbolo: 'BZ$',  nombre: 'Dólar beliceño' },
+  GYD: { simbolo: 'GY$',  nombre: 'Dólar guyanés' },
+  SRD: { simbolo: '$',    nombre: 'Dólar surinamés' },
+  // Principales del mundo
+  USD: { simbolo: '$',   nombre: 'Dólar estadounidense' },
+  EUR: { simbolo: '€',   nombre: 'Euro' },
+  GBP: { simbolo: '£',   nombre: 'Libra esterlina' },
+  JPY: { simbolo: '¥',   nombre: 'Yen japonés' },
+  CAD: { simbolo: 'C$',  nombre: 'Dólar canadiense' },
 };
 
 const TIPOS_CUENTA = [
@@ -586,7 +612,7 @@ function accionEditarCuenta({ cuentaId, nombre, tipo, saldoInicial }) {
   guardarEstado();
 }
 
-function accionAgregarTarjeta({ nombre, limite, diaCorte, diaPago }) {
+function accionAgregarTarjeta({ nombre, limite, diaCorte, diaPago, fechaCorte, fechaPago }) {
   if (!nombre || !nombre.trim()) throw new Error('El nombre de la tarjeta es obligatorio.');
   if (!(limite > 0)) throw new Error('El límite debe ser mayor a 0.');
   const tarjeta = {
@@ -594,8 +620,10 @@ function accionAgregarTarjeta({ nombre, limite, diaCorte, diaPago }) {
     nombre: nombre.trim(),
     limite: Number(limite),
     consumoActual: 0,
-    diaCorte: diaCorte ? Number(diaCorte) : 1,
-    diaPago: diaPago ? Number(diaPago) : 15,
+    diaCorte: diaCorte ? Number(diaCorte) : null,
+    diaPago: diaPago ? Number(diaPago) : null,
+    fechaCorte: fechaCorte || null,
+    fechaPago: fechaPago || null,
   };
   STATE.tarjetas.push(tarjeta);
   guardarEstado();
@@ -628,15 +656,17 @@ function accionPagarTarjeta({ tarjetaId, monto, cuentaId }) {
   guardarEstado();
 }
 
-function accionEditarTarjeta({ tarjetaId, nombre, limite, diaCorte, diaPago }) {
+function accionEditarTarjeta({ tarjetaId, nombre, limite, diaCorte, diaPago, fechaCorte, fechaPago }) {
   const tarjeta = STATE.tarjetas.find(t => t.id === tarjetaId);
   if (!tarjeta) throw new Error('Tarjeta no encontrada.');
   if (!nombre || !nombre.trim()) throw new Error('El nombre es obligatorio.');
   if (!(limite > 0)) throw new Error('El límite debe ser mayor a 0.');
   tarjeta.nombre = nombre.trim();
   tarjeta.limite = Number(limite);
-  tarjeta.diaCorte = diaCorte ? Number(diaCorte) : tarjeta.diaCorte;
-  tarjeta.diaPago = diaPago ? Number(diaPago) : tarjeta.diaPago;
+  if (fechaCorte) tarjeta.fechaCorte = fechaCorte;
+  if (fechaPago) tarjeta.fechaPago = fechaPago;
+  if (diaCorte) tarjeta.diaCorte = Number(diaCorte);
+  if (diaPago) tarjeta.diaPago = Number(diaPago);
   guardarEstado();
 }
 
@@ -657,12 +687,16 @@ function accionEliminarGenerico(coleccion, id) {
 
 /* ==================== PRÉSTAMOS OTORGADOS ==================== */
 
-function accionAgregarPrestamo({ persona, monto, descripcion, fecha, cuentaId }) {
+function accionAgregarPrestamo({ persona, monto, descripcion, fecha, cuentaId, yaDescontado }) {
   if (!persona || !persona.trim()) throw new Error('El nombre de la persona es obligatorio.');
   if (!(monto > 0)) throw new Error('El monto debe ser mayor a 0.');
-  if (!cuentaId) throw new Error('Selecciona la cuenta desde la que prestaste.');
-  const saldo = saldoCuenta(cuentaId);
-  if (Number(monto) > saldo) throw new Error('Saldo insuficiente en la cuenta seleccionada.');
+
+  // Si NO es un préstamo anterior, validar cuenta y saldo
+  if (!yaDescontado) {
+    if (!cuentaId) throw new Error('Selecciona la cuenta desde la que prestaste.');
+    const saldo = saldoCuenta(cuentaId);
+    if (Number(monto) > saldo) throw new Error('Saldo insuficiente en la cuenta seleccionada.');
+  }
 
   const prestamo = {
     id: uid(),
@@ -670,26 +704,29 @@ function accionAgregarPrestamo({ persona, monto, descripcion, fecha, cuentaId })
     montoOriginal: Number(monto),
     descripcion: (descripcion || '').trim(),
     fecha: fecha || hoyISO(),
-    cuentaId,
-    estado: 'activo', // activo | parcial | cobrado
+    cuentaId: yaDescontado ? null : cuentaId,
+    yaDescontado: !!yaDescontado,
+    estado: 'activo',
     cobros: [],
   };
 
-  // El préstamo sale de la cuenta como un gasto especial
-  STATE.gastos.unshift({
-    id: uid(),
-    descripcion: `Préstamo a ${prestamo.persona}`,
-    monto: Number(monto),
-    categoria: 'prestamo_otorgado',
-    cuentaId,
-    tarjetaId: null,
-    esPrestamoOtorgado: true,
-    prestamoId: prestamo.id,
-    fecha: prestamo.fecha,
-  });
+  // Solo crear gasto si el dinero sale de una cuenta ahora
+  if (!yaDescontado) {
+    STATE.gastos.unshift({
+      id: uid(),
+      descripcion: `Préstamo a ${prestamo.persona}`,
+      monto: Number(monto),
+      categoria: 'prestamo_otorgado',
+      cuentaId,
+      tarjetaId: null,
+      esPrestamoOtorgado: true,
+      prestamoId: prestamo.id,
+      fecha: prestamo.fecha,
+    });
+  }
 
   STATE.prestamos.unshift(prestamo);
-  registrarMovimiento('prestamo', `Préstamo a ${prestamo.persona}`, -Number(monto));
+  registrarMovimiento('prestamo', `Préstamo a ${prestamo.persona}`, yaDescontado ? 0 : -Number(monto));
   guardarEstado();
   return prestamo;
 }

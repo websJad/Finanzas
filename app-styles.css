@@ -121,11 +121,8 @@ a { color: inherit; }
 .topbar-brand { display: flex; align-items: center; gap: 8px; }
 .brand-mark {
   width: 32px; height: 32px;
-  background: var(--lima);
-  color: #0B0D10;
-  border-radius: 9px;
   display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-display); font-weight: 700; font-size: 16px;
+  flex-shrink: 0;
 }
 .brand-name { font-family: var(--font-display); font-weight: 600; font-size: 17px; }
 
@@ -155,10 +152,15 @@ a { color: inherit; }
 .icon-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 .badge-dot {
-  position: absolute; top: 6px; right: 7px;
-  width: 8px; height: 8px; border-radius: 50%;
+  position: absolute; top: 2px; right: 2px;
+  min-width: 16px; height: 16px; border-radius: 8px;
   background: var(--rojo);
   border: 2px solid var(--surface);
+  color: #fff;
+  font-size: 9px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 3px;
+  line-height: 1;
 }
 
 .only-mobile { display: none; }

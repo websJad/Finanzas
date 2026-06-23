@@ -47,7 +47,10 @@ function configurarNavegacion() {
     aplicarTema();
   });
 
-  document.getElementById('btnNotif').addEventListener('click', () => navegarA('pendientes'));
+  document.getElementById('btnNotif').addEventListener('click', () => {
+    if (typeof abrirPanelNotificaciones === 'function') abrirPanelNotificaciones();
+    else navegarA('pendientes');
+  });
 }
 
 function configurarSidebarMobile() {
